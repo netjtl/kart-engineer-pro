@@ -1,10 +1,7 @@
-
 import { TelemetrySettings, Track, WeatherType, RaceResult, RaceEntry, AIDifficulty } from "../types";
 
-/**
- * Professional Kart Racing Physics Simulation Service
- * Architecture: Proxy to Netlify Functions for Zero-Visibility Security
- */
+export type AIProvider = "gemini" | "claude";
+
 export async function simulateRace(
   telemetry: TelemetrySettings,
   track: Track,
@@ -12,9 +9,9 @@ export async function simulateRace(
   isSandbox: boolean,
   history: RaceEntry[] = [],
   aiDifficulty: AIDifficulty = AIDifficulty.OFF,
-  manualKey?: string
+  manualKey?: string,
+  provider: AIProvider = "gemini"
 ): Promise<RaceResult> {
-  // Sandbox Mode: Local Physics Approximation (No API required)
   if (isSandbox) {
     return new Promise((resolve) => {
       setTimeout(() => {
@@ -22,12 +19,10 @@ export async function simulateRace(
         const weatherMod = weather === WeatherType.SUNNY ? 0 : weather === WeatherType.RAINY ? 4.5 : 2.0;
         const tireMod = Math.abs(telemetry.tirePressure - 18) * 0.2;
         const gearMod = (telemetry.gearRatio - 4.5) * 0.5;
-        
         const lapTimes = Array.from({ length: 5 }, (_, i) => {
           const jitter = Math.random() * 0.4;
           return baseTime + weatherMod + tireMod + gearMod + jitter + (i * 0.15);
         });
-
         resolve({
           lapTimes,
           topSpeed: 160 + (telemetry.engineMapping * 5) - (telemetry.aeroDownforce * 0.2),
@@ -35,26 +30,18 @@ export async function simulateRace(
           tireWear: 8 + (telemetry.engineMapping * 2),
           engineHeat: 85 + (telemetry.engineMapping * 10),
           brakeTemp: 200 + (telemetry.brakeBias * 2),
-          summary: "SANDBOX PHYSICS: Local model active. Environment variable or manual key required for Pro Link.",
+          summary: "SANDBOX PHYSICS: Local model active. Enter an API key for Pro Link.",
           advice: "Switch to Pro Physics Link for AI-driven track strategy and rival analysis."
         });
       }, 1500);
     });
   }
 
-  // PRO MODE: Call Netlify Function
   try {
-    const response = await fetch('/.netlify/functions/simulate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        telemetry,
-        track,
-        weather,
-        history,
-        aiDifficulty,
-        manualKey // Passed to server if user entered it in UI
-      })
+    const response = await fetch("/.netlify/functions/simulate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ telemetry, track, weather, history, aiDifficulty, manualKey, provider })
     });
 
     if (!response.ok) {
@@ -69,16 +56,12 @@ export async function simulateRace(
   }
 }
 
-/**
- * Lightweight verification ping
- */
-export async function verifyLink(manualKey?: string): Promise<boolean> {
+export async function verifyLink(manualKey?: string, provider: AIProvider = "gemini"): Promise<boolean> {
   try {
-    // Send a minimal request to test the key
-    const response = await fetch('/.netlify/functions/simulate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ manualKey, ping: true }) 
+    const response = await fetch("/.netlify/functions/simulate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ manualKey, provider, ping: true })
     });
     return response.ok;
   } catch {

@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { TelemetrySettings, Track, WeatherType, RaceResult, TrackHistory, RaceEntry, AIDifficulty } from './types';
 import { TRACKS, WEATHER_OPTIONS, AI_CONFIGS } from './constants';
-import { simulateRace, verifyLink } from './services/geminiService';
+import { simulateRace, verifyLink, AIProvider } from './services/geminiService';
 import Slider from './components/Slider';
 import RaceVisualizer from './components/RaceVisualizer';
 import TelemetryDashboard from './components/TelemetryDashboard';
@@ -17,7 +17,8 @@ const App: React.FC = () => {
   const [manualKey, setManualKey] = useState('');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
   const [showEmbedCode, setShowEmbedCode] = useState(false);
-  
+  const [aiProvider, setAiProvider] = useState<AIProvider>('gemini');
+
   const getSavedSetup = () => {
     try {
       const saved = localStorage.getItem('kart_saved_setup');
@@ -28,18 +29,18 @@ const App: React.FC = () => {
   const savedSetup = getSavedSetup();
 
   const [isSandboxMode, setIsSandboxMode] = useState<boolean>(false);
-  const [selectedTrack, setSelectedTrack] = useState<Track>(() => 
+  const [selectedTrack, setSelectedTrack] = useState<Track>(() =>
     savedSetup ? (TRACKS.find(t => t.id === savedSetup.trackId) || TRACKS[0]) : TRACKS[0]
   );
-  const [selectedWeather, setSelectedWeather] = useState<WeatherType>(() => 
+  const [selectedWeather, setSelectedWeather] = useState<WeatherType>(() =>
     savedSetup?.weather || WeatherType.SUNNY
   );
-  const [aiDifficulty, setAiDifficulty] = useState<AIDifficulty>(() => 
+  const [aiDifficulty, setAiDifficulty] = useState<AIDifficulty>(() =>
     savedSetup?.aiDifficulty || AIDifficulty.OFF
   );
   const [sessionNotes, setSessionNotes] = useState<string>('');
-  
-  const [telemetry, setTelemetry] = useState<TelemetrySettings>(() => 
+
+  const [telemetry, setTelemetry] = useState<TelemetrySettings>(() =>
     savedSetup?.telemetry || {
       tirePressure: 20,
       gearRatio: 4.5,
@@ -110,14 +111,14 @@ const App: React.FC = () => {
     setConnectionStatus('verifying');
     setError(null);
     try {
-      const ok = await verifyLink(manualKey);
+      const ok = await verifyLink(manualKey, aiProvider);
       if (ok) {
         setConnectionStatus('connected');
         setIsSandboxMode(false);
         setShowKeyPanel(false);
       } else {
         setConnectionStatus('disconnected');
-        setError("Verification link failed. Please check your API key.");
+        setError("Verification failed. Please check your API key.");
       }
     } catch (err: any) {
       setConnectionStatus('disconnected');
@@ -133,12 +134,7 @@ const App: React.FC = () => {
   };
 
   const handleSaveSetup = () => {
-    const config = {
-      trackId: selectedTrack.id,
-      weather: selectedWeather,
-      aiDifficulty,
-      telemetry
-    };
+    const config = { trackId: selectedTrack.id, weather: selectedWeather, aiDifficulty, telemetry };
     localStorage.setItem('kart_saved_setup', JSON.stringify(config));
     setSaveStatus('saved');
     setTimeout(() => setSaveStatus('idle'), 2000);
@@ -167,7 +163,10 @@ const App: React.FC = () => {
 
     try {
       const trackHistory = history[selectedTrack.id] || [];
-      const data = await simulateRace(telemetry, selectedTrack, selectedWeather, isSandboxMode, trackHistory, aiDifficulty, manualKey);
+      const data = await simulateRace(
+        telemetry, selectedTrack, selectedWeather,
+        isSandboxMode, trackHistory, aiDifficulty, manualKey, aiProvider
+      );
       setCurrentResult(data);
     } catch (err: any) {
       let userFriendlyMessage = "The physics engine encountered an unexpected technical failure.";
@@ -181,7 +180,7 @@ const App: React.FC = () => {
       setStintStatus('idle');
       setCurrentResult(null);
     }
-  }, [telemetry, selectedTrack, selectedWeather, history, isSandboxMode, aiDifficulty, manualKey]);
+  }, [telemetry, selectedTrack, selectedWeather, history, isSandboxMode, aiDifficulty, manualKey, aiProvider]);
 
   const updateTelemetry = (key: keyof TelemetrySettings, value: number) => {
     setTelemetry(prev => ({ ...prev, [key]: value }));
@@ -190,6 +189,11 @@ const App: React.FC = () => {
   const isSimulating = stintStatus === 'simulating';
   const currentDomain = typeof window !== 'undefined' ? window.location.origin : 'https://your-app.netlify.app';
   const iframeSnippet = `<iframe src="${currentDomain}" width="100%" height="900px" style="border:none; border-radius:12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);"></iframe>`;
+
+  const providerLabel = aiProvider === 'claude' ? 'Claude' : 'Gemini';
+  const keyPlaceholder = aiProvider === 'claude'
+    ? 'Paste your Anthropic API key (sk-ant-...)...'
+    : 'Paste your Gemini API key (AIza...)...';
 
   return (
     <div className="min-h-screen pb-20 bg-black text-white selection:bg-emerald-500 selection:text-black">
@@ -210,23 +214,23 @@ const App: React.FC = () => {
               </span>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-4">
-            <button 
+            <button
               onClick={() => { setShowKeyPanel(!showKeyPanel); setShowEmbedCode(false); }}
               className={`flex items-center gap-3 px-4 py-2 rounded-xl border transition-all ${
-                connectionStatus === 'connected' ? 'border-emerald-500/30 bg-emerald-500/5' : 
+                connectionStatus === 'connected' ? 'border-emerald-500/30 bg-emerald-500/5' :
                 connectionStatus === 'sandbox' ? 'border-zinc-700 bg-zinc-900' : 'border-red-500/30 bg-red-500/5'
               }`}
             >
               <div className={`w-2 h-2 rounded-full ${
-                connectionStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 
-                connectionStatus === 'verifying' ? 'bg-yellow-500 animate-pulse' : 
+                connectionStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' :
+                connectionStatus === 'verifying' ? 'bg-yellow-500 animate-pulse' :
                 connectionStatus === 'sandbox' ? 'bg-blue-500' : 'bg-red-500 animate-pulse'
               }`} />
               <span className="text-[10px] font-black uppercase tracking-widest text-zinc-300">
-                {connectionStatus === 'connected' ? 'Secure Link Active' : 
-                 connectionStatus === 'verifying' ? 'Verifying...' : 
+                {connectionStatus === 'connected' ? `${providerLabel} Link Active` :
+                 connectionStatus === 'verifying' ? 'Verifying...' :
                  connectionStatus === 'sandbox' ? 'Sandbox Mode' : 'Link Offline'}
               </span>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className={`transition-transform ${showKeyPanel ? 'rotate-180' : ''}`}>
@@ -236,15 +240,46 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        <div className={`overflow-hidden transition-all duration-500 bg-zinc-900/90 border-b border-zinc-800 ${showKeyPanel ? 'max-h-[500px]' : 'max-h-0'}`}>
-          <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
+        <div className={`overflow-hidden transition-all duration-500 bg-zinc-900/90 border-b border-zinc-800 ${showKeyPanel ? 'max-h-[600px]' : 'max-h-0'}`}>
+          <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
+
+            {/* Provider Toggle */}
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">AI Engine</label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setAiProvider('gemini')}
+                  className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${
+                    aiProvider === 'gemini'
+                      ? 'bg-blue-500/20 border-blue-500 text-blue-400'
+                      : 'bg-black border-zinc-800 text-zinc-600 hover:border-zinc-600 hover:text-zinc-400'
+                  }`}
+                >
+                  Gemini
+                </button>
+                <button
+                  onClick={() => setAiProvider('claude')}
+                  className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${
+                    aiProvider === 'claude'
+                      ? 'bg-orange-500/20 border-orange-500 text-orange-400'
+                      : 'bg-black border-zinc-800 text-zinc-600 hover:border-zinc-600 hover:text-zinc-400'
+                  }`}
+                >
+                  Claude
+                </button>
+              </div>
+            </div>
+
+            {/* Key Input */}
             <div className="flex flex-col md:flex-row items-end gap-6">
               <div className="flex-1 space-y-2 w-full">
-                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">Secure Physics Key</label>
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">
+                  {providerLabel} API Key
+                </label>
                 <div className="relative group">
-                  <input 
+                  <input
                     type="password"
-                    placeholder="Paste your Gemini API key here..."
+                    placeholder={keyPlaceholder}
                     className="w-full bg-black border border-zinc-800 rounded-xl px-4 py-3 text-sm font-mono focus:border-emerald-500 outline-none transition-all placeholder:text-zinc-700 text-emerald-400"
                     value={manualKey}
                     onChange={(e) => setManualKey(e.target.value)}
@@ -252,14 +287,14 @@ const App: React.FC = () => {
                 </div>
               </div>
               <div className="flex gap-3 w-full md:w-auto">
-                <button 
+                <button
                   onClick={handleVerifyKey}
                   className="flex-1 md:flex-none px-6 py-3 bg-emerald-500 text-black font-black uppercase text-xs tracking-widest rounded-xl hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50"
                   disabled={!manualKey || connectionStatus === 'verifying'}
                 >
                   Verify
                 </button>
-                <button 
+                <button
                   onClick={handleStartSandbox}
                   className="flex-1 md:flex-none px-6 py-3 bg-zinc-800 text-zinc-400 font-black uppercase text-xs tracking-widest rounded-xl hover:bg-zinc-700 transition-all active:scale-95"
                 >
@@ -269,14 +304,13 @@ const App: React.FC = () => {
             </div>
 
             <div className="pt-4 border-t border-zinc-800">
-              <button 
+              <button
                 onClick={() => setShowEmbedCode(!showEmbedCode)}
                 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest hover:text-emerald-500 transition-colors flex items-center gap-2"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
                 WordPress Embed Assistant
               </button>
-              
               {showEmbedCode && (
                 <div className="mt-4 p-4 bg-black border border-zinc-800 rounded-xl space-y-3 animate-in fade-in slide-in-from-top-2">
                   <p className="text-[10px] text-zinc-500 font-bold leading-relaxed uppercase tracking-widest">
@@ -286,7 +320,7 @@ const App: React.FC = () => {
                     <pre className="p-3 bg-zinc-900 rounded-lg text-xs font-mono text-emerald-500 overflow-x-auto border border-zinc-800">
                       {iframeSnippet}
                     </pre>
-                    <button 
+                    <button
                       onClick={() => { navigator.clipboard.writeText(iframeSnippet); alert('Copied to clipboard!'); }}
                       className="absolute top-2 right-2 p-1.5 bg-zinc-800 text-zinc-400 rounded border border-zinc-700 hover:text-white hover:bg-zinc-700 transition-all"
                     >
@@ -307,7 +341,7 @@ const App: React.FC = () => {
               <div className="flex justify-between items-center">
                 <h2 className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Environment Setup</h2>
                 <div className="flex gap-2">
-                  <button 
+                  <button
                     onClick={handleRecallSetup}
                     disabled={!localStorage.getItem('kart_saved_setup') || isSimulating}
                     className="flex items-center gap-2 px-2 py-1 rounded border border-zinc-700 text-[8px] font-black uppercase tracking-widest text-zinc-500 hover:border-zinc-500 hover:text-zinc-300 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
@@ -315,7 +349,7 @@ const App: React.FC = () => {
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
                     Recall
                   </button>
-                  <button 
+                  <button
                     onClick={handleSaveSetup}
                     disabled={isSimulating}
                     className={`flex items-center gap-2 px-2 py-1 rounded border text-[8px] font-black uppercase tracking-widest transition-all ${
@@ -323,15 +357,9 @@ const App: React.FC = () => {
                     }`}
                   >
                     {saveStatus === 'saved' ? (
-                      <>
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><path d="M20 6L9 17L4 12"/></svg>
-                        Saved
-                      </>
+                      <><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><path d="M20 6L9 17L4 12"/></svg>Saved</>
                     ) : (
-                      <>
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                        Save
-                      </>
+                      <><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save</>
                     )}
                   </button>
                 </div>
@@ -339,7 +367,7 @@ const App: React.FC = () => {
               <div className="space-y-4">
                 <div>
                   <label className="text-[10px] text-zinc-600 uppercase font-black block mb-2">Target Circuit</label>
-                  <select 
+                  <select
                     disabled={isSimulating}
                     className="w-full bg-black border border-zinc-800 rounded-lg p-3 text-sm text-white focus:ring-1 focus:ring-emerald-500 outline-none disabled:opacity-50 transition-all"
                     onChange={(e) => setSelectedTrack(TRACKS.find(t => t.id === e.target.value) || TRACKS[0])}
@@ -400,7 +428,7 @@ const App: React.FC = () => {
                 {isSimulating ? 'Projecting Telemetry...' : 'Run Simulation'}
               </button>
             </div>
-            
+
             {error && (
               <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl text-red-400 text-[10px] font-black uppercase tracking-widest flex items-center gap-3 shadow-lg animate-in slide-in-from-top-2">
                 <div className="shrink-0">
@@ -435,10 +463,10 @@ const App: React.FC = () => {
                 )}
                 {(stintStatus === 'simulating' || stintStatus === 'analyzing') && (
                   <div className="w-full h-full flex flex-col justify-center">
-                    <RaceVisualizer 
+                    <RaceVisualizer
                       key={raceId}
-                      result={currentResult} 
-                      isSimulating={isSimulating} 
+                      result={currentResult}
+                      isSimulating={isSimulating}
                       onAnimationComplete={() => setAnimationFinished(true)}
                       aiDifficulty={aiDifficulty}
                     />
@@ -448,14 +476,14 @@ const App: React.FC = () => {
             </div>
 
             {stintStatus === 'analyzing' && currentResult && (
-              <TelemetryDashboard 
-                result={currentResult} 
-                telemetry={telemetry} 
-                history={history[selectedTrack.id] || []} 
+              <TelemetryDashboard
+                result={currentResult}
+                telemetry={telemetry}
+                history={history[selectedTrack.id] || []}
                 aiDifficulty={aiDifficulty}
               />
             )}
-            
+
             {Object.keys(history).length > 0 && stintStatus !== 'simulating' && (
               <HistoryTrendChart history={history} activeTrackId={selectedTrack.id} />
             )}
