@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import { RaceResult, RaceEntry, TelemetrySettings, AIDifficulty } from '../types';
 import { AI_CONFIGS } from '../constants';
+import LapTimeChart from './LapTimeChart';
 
 interface TelemetryDashboardProps {
   result: RaceResult;
@@ -129,12 +130,6 @@ const getDifficultyIndicator = (difficulty?: AIDifficulty) => {
 const TelemetryDashboard: React.FC<TelemetryDashboardProps> = ({ result, telemetry, history = [], notes, aiDifficulty }) => {
   if (!result || !result.lapTimes) return null;
 
-  const lapData = result.lapTimes.map((time, index) => ({
-    lap: `Lap ${index + 1}`,
-    player: parseFloat((time || 0).toFixed(3)),
-    ai: (result.aiLapTimes && result.aiLapTimes[index]) ? parseFloat(result.aiLapTimes[index].toFixed(3)) : undefined
-  }));
-
   const deltaData = result.lapTimes.map((time, index) => {
     if (result.aiLapTimes && result.aiLapTimes[index] !== undefined) {
       return {
@@ -208,29 +203,9 @@ const TelemetryDashboard: React.FC<TelemetryDashboardProps> = ({ result, telemet
 
   return (
     <div className="TelemetryDashboard space-y-8 mt-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-12">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl">
-          <div className="flex items-center mb-6">
-            <h3 className="text-xs font-black text-zinc-500 uppercase tracking-[0.2em]">
-              {result.aiLapTimes ? 'Player vs Rival Pace (s)' : 'Stint Performance (s)'}
-            </h3>
-            {getDifficultyIndicator(aiDifficulty)}
-          </div>
-          <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={lapData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                <XAxis dataKey="lap" stroke="#71717a" fontSize={10} tickLine={false} />
-                <YAxis stroke="#71717a" fontSize={10} domain={['auto', 'auto']} tickLine={false} axisLine={false} />
-                <Tooltip contentStyle={{ backgroundColor: '#09090b', borderColor: '#27272a', borderRadius: '8px', fontSize: '12px' }} />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: '9px', textTransform: 'uppercase', paddingTop: '10px' }} />
-                <Line type="monotone" dataKey="player" name="You" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} />
-                {result.aiLapTimes && <Line type="monotone" dataKey="ai" name="Rival" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />}
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+      <LapTimeChart result={result} aiDifficulty={aiDifficulty} />
 
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl">
           <div className="flex items-center mb-6">
             <h3 className="text-xs font-black text-zinc-500 uppercase tracking-[0.2em]">
